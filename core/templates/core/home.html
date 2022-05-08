@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html>
+<body>
+<div class="left">
+    <div id="startButton" class="button">
+        Start Recording
+    </div>
+    <h2>Preview</h2>
+    <video id="preview" width="160" height="120" autoplay muted></video>
+    </div>
+
+    <div class="right">
+        <div id="stopButton" class="button">
+            Stop Recording
+        </div>
+        <h2>Recording</h2>
+        <video id="recording" width="160" height="120" controls></video>
+        <a id="uploadBtn" class="button">
+            Download
+        </a>
+
+        <form action="." method="post" enctype="multipart/form-data">
+            {% csrf_token %}
+            <input type="file" name="video" id="recordedVideo" style="display: none;">
+            <input type="submit" value="Upload">
+        </form>
+    </div>
+
+    <div id="log"></div>
+</body>
+
+<script>
+let preview = document.getElementById("preview");
+let recording = document.getElementById("recording");
+let startButton = document.getElementById("startButton");
+let stopButton = document.getElementById("stopButton");
+let uploadBtn = document.getElementById("uploadBtn");
+let logElement = document.getElementById("log");
+let recordedVideoInput = document.getElementById('recordedVideo');
+
+let recordingTimeMS = 5000;
+
+function log(msg) {
+  logElement.innerHTML += msg + "\n";
+}
+
+function wait(delayInMS) {
+  return new Promise(resolve => setTimeout(resolve, delayInMS));
+}
+
+
+function startRecording(stream, lengthInMS) {
+  let recorder = new MediaRecorder(stream);
+  let data = [];
+
+  recorder.ondataavailable = event => data.push(event.data);
+  recorder.start();
+  log(recorder.state + " for " + (lengthInMS/1000) + " seconds...");
+
+  let stopped = new Promise((resolve, reject) => {
+    recorder.onstop = resolve;
+    recorder.onerror = event => reject(event.name);
+  });
+
+  let recorded = wait(lengthInMS).then(
+    () => recorder.state == "recording" && recorder.stop()
+  );
+
+  return Promise.all([
+    stopped,
+    recorded
+  ])
+  .then(() => data);
+}
+
+function stop(stream) {
+  stream.getTracks().forEach(track => track.stop());
+}
+
+startButton.addEventListener("click", function() {
+  navigator.mediaDevices.getUserMedia({
+    video: true,
+    audio: true
+  }).then(stream => {
+    preview.srcObject = stream;
+    uploadBtn.href = stream;
+    preview.captureStream = preview.captureStream || preview.mozCaptureStream;
+    return new Promise(resolve => preview.onplaying = resolve);
+  }).then(() => startRecording(preview.captureStream(), recordingTimeMS))
+  .then (recordedChunks => {
+    let recordedBlob = new Blob(recordedChunks, { type: "video/webm" });
+    console.log(recordedBlob);
+
+    //VIDEO UPLOAD START
+    let file = new File([recordedBlob], "video");
+    let container = new DataTransfer();
+    container.items.add(file);
+    recordedVideoInput.files = container.files;
+    //VIDEO UPLOAD END
+
+    recording.src = URL.createObjectURL(recordedBlob);
+    uploadBtn.href = recording.src;
+    uploadBtn.download = "RecordedVideo.webm";
+
+    log("Successfully recorded " + recordedBlob.size + " bytes of " +
+        recordedBlob.type + " media.");
+  })
+  .catch((error) => {
+    if (error.name === "NotFoundError") {
+      log("Camera or microphone not found. Can’t record.");
+    } else {
+      log(error);
+    }
+  });
+}, false);
+
+stopButton.addEventListener("click", function() {
+  stop(preview.srcObject);
+}, false);
+</script>
+
+</html>
+
+
+
